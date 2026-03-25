@@ -1,88 +1,92 @@
-// Fetches real resort-reported snow data from skiresort.info + Open-Meteo forecasts
-// Snow depths are exactly as reported by the resorts themselves (updated daily)
+// Fetches real resort-reported snow data from skiresort.info + enriched Open-Meteo forecasts
+// Key improvements:
+//   - elevation= param forces Open-Meteo to use the correct mountain-top grid cell
+//   - snow_depth_max gives NWP-modelled current snowpack (cross-check vs resort reports)
+//   - wind_gusts_10m_max added (critical for lift closures)
+//   - precipitation_probability_max + freezing_level_height (rain vs snow indicator)
+//   - All 4 skiresort.info pages fetched in parallel (faster + more resorts covered)
 
 Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
-    const { days = 3 } = body;
+    const { days = 5 } = body;
 
-    const resortMeta: Record<string, { name: string; country: string; liftPass: number; flightHub: string; lat: number; lon: number }> = {
+    // topElev = summit station elevation in metres — used for Open-Meteo elevation= param
+    const resortMeta: Record<string, {
+      name: string; country: string; liftPass: number;
+      flightHub: string; lat: number; lon: number; topElev: number;
+    }> = {
       // ── FRANCE ──────────────────────────────────────────────────────────────
-      "tignes-val-disere": { name: "Tignes / Val d'Isère", country: "France", liftPass: 75, flightHub: "Geneva", lat: 45.47, lon: 6.91 },
-      "les-3-vallees-val-thorens-les-menuires-meribel-courchevel": { name: "3 Vallées (Val Thorens / Méribel / Courchevel)", country: "France", liftPass: 78, flightHub: "Geneva", lat: 45.29, lon: 6.58 },
-      "les-arcs-peisey-vallandry-paradiski": { name: "Les Arcs / Paradiski", country: "France", liftPass: 65, flightHub: "Geneva", lat: 45.57, lon: 6.80 },
-      "la-plagne-paradiski": { name: "La Plagne / Paradiski", country: "France", liftPass: 68, flightHub: "Geneva", lat: 45.51, lon: 6.68 },
-      "alpe-dhuez": { name: "Alpe d'Huez", country: "France", liftPass: 70, flightHub: "Geneva", lat: 45.09, lon: 6.07 },
-      "les-2-alpes": { name: "Les 2 Alpes", country: "France", liftPass: 62, flightHub: "Geneva", lat: 45.00, lon: 6.12 },
-      "brevent-flegere-chamonix": { name: "Chamonix – Brévent / Flégère", country: "France", liftPass: 72, flightHub: "Geneva", lat: 45.92, lon: 6.87 },
-      "grands-montets-argentiere-chamonix": { name: "Chamonix – Grands Montets", country: "France", liftPass: 72, flightHub: "Geneva", lat: 45.97, lon: 6.92 },
-      "les-houches-saint-gervais-prarion-bellevue-chamonix": { name: "Les Houches / Saint-Gervais (Chamonix)", country: "France", liftPass: 58, flightHub: "Geneva", lat: 45.89, lon: 6.80 },
-      "les-portes-du-soleil-morzine-avoriaz-les-gets-chatel-morgins-champery": { name: "Portes du Soleil (Morzine / Avoriaz)", country: "France", liftPass: 60, flightHub: "Geneva", lat: 46.18, lon: 6.72 },
+      "tignes-val-disere": { name: "Tignes / Val d'Isère", country: "France", liftPass: 75, flightHub: "Geneva", lat: 45.47, lon: 6.91, topElev: 3456 },
+      "les-3-vallees-val-thorens-les-menuires-meribel-courchevel": { name: "3 Vallées (Val Thorens / Méribel / Courchevel)", country: "France", liftPass: 78, flightHub: "Geneva", lat: 45.29, lon: 6.58, topElev: 3230 },
+      "les-arcs-peisey-vallandry-paradiski": { name: "Les Arcs / Paradiski", country: "France", liftPass: 65, flightHub: "Geneva", lat: 45.57, lon: 6.80, topElev: 3226 },
+      "la-plagne-paradiski": { name: "La Plagne / Paradiski", country: "France", liftPass: 68, flightHub: "Geneva", lat: 45.51, lon: 6.68, topElev: 3250 },
+      "alpe-dhuez": { name: "Alpe d'Huez", country: "France", liftPass: 70, flightHub: "Geneva", lat: 45.09, lon: 6.07, topElev: 3330 },
+      "les-2-alpes": { name: "Les 2 Alpes", country: "France", liftPass: 62, flightHub: "Geneva", lat: 45.00, lon: 6.12, topElev: 3523 },
+      "brevent-flegere-chamonix": { name: "Chamonix – Brévent / Flégère", country: "France", liftPass: 72, flightHub: "Geneva", lat: 45.92, lon: 6.87, topElev: 2525 },
+      "grands-montets-argentiere-chamonix": { name: "Chamonix – Grands Montets", country: "France", liftPass: 72, flightHub: "Geneva", lat: 45.97, lon: 6.92, topElev: 3275 },
+      "les-houches-saint-gervais-prarion-bellevue-chamonix": { name: "Les Houches / Saint-Gervais", country: "France", liftPass: 58, flightHub: "Geneva", lat: 45.89, lon: 6.80, topElev: 1900 },
+      "les-portes-du-soleil-morzine-avoriaz-les-gets-chatel-morgins-champery": { name: "Portes du Soleil (Morzine / Avoriaz)", country: "France", liftPass: 60, flightHub: "Geneva", lat: 46.18, lon: 6.72, topElev: 2254 },
       // ── SPAIN ───────────────────────────────────────────────────────────────
-      "sierra-nevada-pradollano": { name: "Sierra Nevada", country: "Spain", liftPass: 38, flightHub: "Málaga", lat: 37.09, lon: -3.40 },
+      "sierra-nevada-pradollano": { name: "Sierra Nevada", country: "Spain", liftPass: 38, flightHub: "Málaga", lat: 37.09, lon: -3.40, topElev: 3300 },
       // ── SWITZERLAND ─────────────────────────────────────────────────────────
-      "zermatt-breuil-cervinia-valtournenche-matterhorn": { name: "Zermatt / Cervinia (Matterhorn)", country: "Switzerland", liftPass: 85, flightHub: "Geneva", lat: 46.00, lon: 7.73 },
-      "4-vallees-verbier-la-tzoumaz-nendaz-veysonnaz-thyon": { name: "Verbier / 4 Vallées", country: "Switzerland", liftPass: 82, flightHub: "Geneva", lat: 46.07, lon: 7.28 },
-      "saas-fee": { name: "Saas-Fee", country: "Switzerland", liftPass: 75, flightHub: "Geneva", lat: 46.11, lon: 7.93 },
-      "laax-flims-falera": { name: "Laax / Flims", country: "Switzerland", liftPass: 72, flightHub: "Zurich", lat: 46.83, lon: 9.28 },
-      "parsenn-davos-klosters": { name: "Davos / Klosters (Parsenn)", country: "Switzerland", liftPass: 78, flightHub: "Zurich", lat: 46.83, lon: 9.85 },
-      "andermatt-oberalp-sedrun": { name: "Andermatt / Sedrun", country: "Switzerland", liftPass: 68, flightHub: "Zurich", lat: 46.64, lon: 8.59 },
-      "crans-montana": { name: "Crans-Montana", country: "Switzerland", liftPass: 72, flightHub: "Geneva", lat: 46.31, lon: 7.48 },
-      "schilthorn-muerren-lauterbrunnen": { name: "Schilthorn / Mürren", country: "Switzerland", liftPass: 65, flightHub: "Zurich", lat: 46.56, lon: 7.90 },
-      "kleine-scheidegg-maennlichen-grindelwald-wengen": { name: "Grindelwald / Wengen / Männlichen", country: "Switzerland", liftPass: 70, flightHub: "Zurich", lat: 46.62, lon: 8.04 },
-      "titlis-engelberg": { name: "Engelberg (Titlis)", country: "Switzerland", liftPass: 72, flightHub: "Zurich", lat: 46.82, lon: 8.39 },
-      "glacier-3000-les-diablerets": { name: "Glacier 3000 / Les Diablerets", country: "Switzerland", liftPass: 60, flightHub: "Geneva", lat: 46.35, lon: 7.18 },
+      "zermatt-breuil-cervinia-valtournenche-matterhorn": { name: "Zermatt / Cervinia (Matterhorn)", country: "Switzerland", liftPass: 85, flightHub: "Geneva", lat: 46.00, lon: 7.73, topElev: 3883 },
+      "4-vallees-verbier-la-tzoumaz-nendaz-veysonnaz-thyon": { name: "Verbier / 4 Vallées", country: "Switzerland", liftPass: 82, flightHub: "Geneva", lat: 46.07, lon: 7.28, topElev: 3330 },
+      "saas-fee": { name: "Saas-Fee", country: "Switzerland", liftPass: 75, flightHub: "Geneva", lat: 46.11, lon: 7.93, topElev: 3573 },
+      "laax-flims-falera": { name: "Laax / Flims", country: "Switzerland", liftPass: 72, flightHub: "Zurich", lat: 46.83, lon: 9.28, topElev: 3018 },
+      "parsenn-davos-klosters": { name: "Davos / Klosters (Parsenn)", country: "Switzerland", liftPass: 78, flightHub: "Zurich", lat: 46.83, lon: 9.85, topElev: 2844 },
+      "andermatt-oberalp-sedrun": { name: "Andermatt / Sedrun", country: "Switzerland", liftPass: 68, flightHub: "Zurich", lat: 46.64, lon: 8.59, topElev: 2963 },
+      "crans-montana": { name: "Crans-Montana", country: "Switzerland", liftPass: 72, flightHub: "Geneva", lat: 46.31, lon: 7.48, topElev: 2927 },
+      "schilthorn-muerren-lauterbrunnen": { name: "Schilthorn / Mürren", country: "Switzerland", liftPass: 65, flightHub: "Zurich", lat: 46.56, lon: 7.90, topElev: 2970 },
+      "kleine-scheidegg-maennlichen-grindelwald-wengen": { name: "Grindelwald / Wengen / Männlichen", country: "Switzerland", liftPass: 70, flightHub: "Zurich", lat: 46.62, lon: 8.04, topElev: 2971 },
+      "titlis-engelberg": { name: "Engelberg (Titlis)", country: "Switzerland", liftPass: 72, flightHub: "Zurich", lat: 46.82, lon: 8.39, topElev: 3020 },
+      "glacier-3000-les-diablerets": { name: "Glacier 3000 / Les Diablerets", country: "Switzerland", liftPass: 60, flightHub: "Geneva", lat: 46.35, lon: 7.18, topElev: 3016 },
       // ── AUSTRIA ─────────────────────────────────────────────────────────────
-      "st-anton-st-christoph-stuben-lech-zuers-warth-schroecken-ski-arlberg": { name: "Ski Arlberg (St. Anton / Lech / Zürs)", country: "Austria", liftPass: 62, flightHub: "Innsbruck", lat: 47.08, lon: 10.23 },
-      "ischgl-samnaun-silvretta-arena": { name: "Ischgl / Silvretta Arena", country: "Austria", liftPass: 68, flightHub: "Innsbruck", lat: 47.01, lon: 10.29 },
-      "soelden": { name: "Sölden", country: "Austria", liftPass: 60, flightHub: "Innsbruck", lat: 46.95, lon: 11.00 },
-      "kitzski-kitzbuehel-kirchberg": { name: "Kitzbühel (KitzSki)", country: "Austria", liftPass: 65, flightHub: "Innsbruck", lat: 47.40, lon: 12.38 },
-      "obertauern": { name: "Obertauern", country: "Austria", liftPass: 58, flightHub: "Salzburg", lat: 47.25, lon: 13.57 },
-      "mayrhofen-penken-ahorn-rastkogel-eggalm-mountopolis": { name: "Mayrhofen", country: "Austria", liftPass: 55, flightHub: "Innsbruck", lat: 47.17, lon: 11.87 },
-      "stubai-glacier-stubaier-gletscher": { name: "Stubai Glacier", country: "Austria", liftPass: 58, flightHub: "Innsbruck", lat: 47.06, lon: 11.13 },
-      "hintertux-glacier-hintertuxer-gletscher": { name: "Hintertux Glacier", country: "Austria", liftPass: 62, flightHub: "Innsbruck", lat: 47.06, lon: 11.67 },
-      "skiwelt-wilder-kaiser-brixental": { name: "SkiWelt Wilder Kaiser", country: "Austria", liftPass: 60, flightHub: "Innsbruck", lat: 47.44, lon: 12.17 },
-      "kitzsteinhorn-maiskogel-kaprun": { name: "Kitzsteinhorn / Kaprun (Glacier)", country: "Austria", liftPass: 62, flightHub: "Salzburg", lat: 47.19, lon: 12.70 },
-      "zillertal-arena-zell-am-ziller-gerlos-koenigsleiten-hochkrimml": { name: "Zillertal Arena", country: "Austria", liftPass: 58, flightHub: "Innsbruck", lat: 47.23, lon: 12.04 },
-      "serfaus-fiss-ladis": { name: "Serfaus-Fiss-Ladis", country: "Austria", liftPass: 62, flightHub: "Innsbruck", lat: 47.04, lon: 10.61 },
+      "st-anton-st-christoph-stuben-lech-zuers-warth-schroecken-ski-arlberg": { name: "Ski Arlberg (St. Anton / Lech / Zürs)", country: "Austria", liftPass: 62, flightHub: "Innsbruck", lat: 47.08, lon: 10.23, topElev: 2811 },
+      "ischgl-samnaun-silvretta-arena": { name: "Ischgl / Silvretta Arena", country: "Austria", liftPass: 68, flightHub: "Innsbruck", lat: 47.01, lon: 10.29, topElev: 2872 },
+      "soelden": { name: "Sölden", country: "Austria", liftPass: 60, flightHub: "Innsbruck", lat: 46.95, lon: 11.00, topElev: 3340 },
+      "kitzski-kitzbuehel-kirchberg": { name: "Kitzbühel (KitzSki)", country: "Austria", liftPass: 65, flightHub: "Innsbruck", lat: 47.40, lon: 12.38, topElev: 2000 },
+      "obertauern": { name: "Obertauern", country: "Austria", liftPass: 58, flightHub: "Salzburg", lat: 47.25, lon: 13.57, topElev: 2313 },
+      "mayrhofen-penken-ahorn-rastkogel-eggalm-mountopolis": { name: "Mayrhofen", country: "Austria", liftPass: 55, flightHub: "Innsbruck", lat: 47.17, lon: 11.87, topElev: 2500 },
+      "stubai-glacier-stubaier-gletscher": { name: "Stubai Glacier", country: "Austria", liftPass: 58, flightHub: "Innsbruck", lat: 47.06, lon: 11.13, topElev: 3210 },
+      "hintertux-glacier-hintertuxer-gletscher": { name: "Hintertux Glacier", country: "Austria", liftPass: 62, flightHub: "Innsbruck", lat: 47.06, lon: 11.67, topElev: 3250 },
+      "skiwelt-wilder-kaiser-brixental": { name: "SkiWelt Wilder Kaiser", country: "Austria", liftPass: 60, flightHub: "Innsbruck", lat: 47.44, lon: 12.17, topElev: 1957 },
+      "kitzsteinhorn-maiskogel-kaprun": { name: "Kitzsteinhorn / Kaprun (Glacier)", country: "Austria", liftPass: 62, flightHub: "Salzburg", lat: 47.19, lon: 12.70, topElev: 3029 },
+      "zillertal-arena-zell-am-ziller-gerlos-koenigsleiten-hochkrimml": { name: "Zillertal Arena", country: "Austria", liftPass: 58, flightHub: "Innsbruck", lat: 47.23, lon: 12.04, topElev: 2500 },
+      "serfaus-fiss-ladis": { name: "Serfaus-Fiss-Ladis", country: "Austria", liftPass: 62, flightHub: "Innsbruck", lat: 47.04, lon: 10.61, topElev: 2828 },
       // ── ITALY ───────────────────────────────────────────────────────────────
-      // Dolomites – Sella Ronda & surrounds
-      "val-gardena-groeden": { name: "Val Gardena – Sella Ronda (Dolomites)", country: "Italy", liftPass: 55, flightHub: "Venice", lat: 46.56, lon: 11.77 },
-      "alta-badia": { name: "Alta Badia – Sella Ronda (Dolomites)", country: "Italy", liftPass: 55, flightHub: "Venice", lat: 46.60, lon: 11.93 },
-      "arabba-marmolada": { name: "Arabba / Marmolada – Sella Ronda", country: "Italy", liftPass: 55, flightHub: "Venice", lat: 46.50, lon: 11.88 },
-      "belvedere-col-rodella-ciampac-buffaure-canazei-campitello-alba-pozza-di-fassa": { name: "Val di Fassa (Canazei / Campitello) – Sella Ronda", country: "Italy", liftPass: 52, flightHub: "Venice", lat: 46.48, lon: 11.76 },
-      "cortina-dampezzo": { name: "Cortina d'Ampezzo", country: "Italy", liftPass: 58, flightHub: "Venice", lat: 46.54, lon: 12.14 },
-      "3-zinnen-dolomites-helm-stiergarten-rotwand-kreuzbergpass": { name: "3 Zinnen Dolomites (Drei Zinnen)", country: "Italy", liftPass: 48, flightHub: "Venice", lat: 46.69, lon: 12.33 },
-      "kronplatz-plan-de-corones": { name: "Kronplatz / Plan de Corones", country: "Italy", liftPass: 52, flightHub: "Venice", lat: 46.74, lon: 11.92 },
-      "alpe-di-siusi-seiser-alm": { name: "Alpe di Siusi / Seiser Alm", country: "Italy", liftPass: 48, flightHub: "Venice", lat: 46.54, lon: 11.63 },
-      "carezza": { name: "Carezza / Karersee (Dolomites)", country: "Italy", liftPass: 45, flightHub: "Venice", lat: 46.41, lon: 11.59 },
-      "latemar-obereggen-pampeago-predazzo": { name: "Latemar / Obereggen (Dolomites)", country: "Italy", liftPass: 48, flightHub: "Venice", lat: 46.37, lon: 11.54 },
-      // Cervinia / Aosta Valley
-      "courmayeur-checrouit-val-veny": { name: "Courmayeur (Mont Blanc)", country: "Italy", liftPass: 58, flightHub: "Geneva", lat: 45.79, lon: 6.97 },
-      "alagna-valsesia-gressoney-la-trinite-champoluc-frachey-monterosa-ski": { name: "Monterosa Ski (Champoluc / Gressoney)", country: "Italy", liftPass: 52, flightHub: "Milan", lat: 45.83, lon: 7.72 },
-      // Milky Way / Via Lattea
-      "via-lattea-sestriere-sauze-doulx-san-sicario-claviere-montgenevre": { name: "Via Lattea (Sestriere / Sauze d'Oulx)", country: "Italy", liftPass: 50, flightHub: "Turin", lat: 44.96, lon: 6.89 },
-      "bardonecchia": { name: "Bardonecchia", country: "Italy", liftPass: 42, flightHub: "Turin", lat: 45.08, lon: 6.70 },
-      // Livigno & Valtellina
-      "livigno": { name: "Livigno (tax-free resort)", country: "Italy", liftPass: 48, flightHub: "Milan", lat: 46.55, lon: 10.14 },
-      "bormio-cima-bianca": { name: "Bormio", country: "Italy", liftPass: 45, flightHub: "Milan", lat: 46.47, lon: 10.37 },
-      "madonna-di-campiglio-pinzolo-folgarida-marilleva": { name: "Madonna di Campiglio", country: "Italy", liftPass: 55, flightHub: "Milan", lat: 46.26, lon: 10.84 },
-      // Tonale / South Tyrol
-      "ponte-di-legno-tonale-presena-glacier-temu-pontedilegno-tonale": { name: "Ponte di Legno / Tonale (Glacier)", country: "Italy", liftPass: 48, flightHub: "Milan", lat: 46.25, lon: 10.52 },
-      "val-senales-glacier-schnalstaler-gletscher": { name: "Val Senales Glacier (Schnals)", country: "Italy", liftPass: 45, flightHub: "Innsbruck", lat: 46.80, lon: 10.84 },
+      "val-gardena-groeden": { name: "Val Gardena – Sella Ronda", country: "Italy", liftPass: 55, flightHub: "Venice", lat: 46.56, lon: 11.77, topElev: 2518 },
+      "alta-badia": { name: "Alta Badia – Sella Ronda", country: "Italy", liftPass: 55, flightHub: "Venice", lat: 46.60, lon: 11.93, topElev: 2778 },
+      "arabba-marmolada": { name: "Arabba / Marmolada – Sella Ronda", country: "Italy", liftPass: 55, flightHub: "Venice", lat: 46.50, lon: 11.88, topElev: 3269 },
+      "belvedere-col-rodella-ciampac-buffaure-canazei-campitello-alba-pozza-di-fassa": { name: "Val di Fassa (Canazei) – Sella Ronda", country: "Italy", liftPass: 52, flightHub: "Venice", lat: 46.48, lon: 11.76, topElev: 2485 },
+      "cortina-dampezzo": { name: "Cortina d'Ampezzo", country: "Italy", liftPass: 58, flightHub: "Venice", lat: 46.54, lon: 12.14, topElev: 2828 },
+      "3-zinnen-dolomites-helm-stiergarten-rotwand-kreuzbergpass": { name: "3 Zinnen Dolomites (Drei Zinnen)", country: "Italy", liftPass: 48, flightHub: "Venice", lat: 46.69, lon: 12.33, topElev: 2225 },
+      "kronplatz-plan-de-corones": { name: "Kronplatz / Plan de Corones", country: "Italy", liftPass: 52, flightHub: "Venice", lat: 46.74, lon: 11.92, topElev: 2275 },
+      "alpe-di-siusi-seiser-alm": { name: "Alpe di Siusi / Seiser Alm", country: "Italy", liftPass: 48, flightHub: "Venice", lat: 46.54, lon: 11.63, topElev: 2220 },
+      "carezza": { name: "Carezza / Karersee (Dolomites)", country: "Italy", liftPass: 45, flightHub: "Venice", lat: 46.41, lon: 11.59, topElev: 2337 },
+      "latemar-obereggen-pampeago-predazzo": { name: "Latemar / Obereggen", country: "Italy", liftPass: 48, flightHub: "Venice", lat: 46.37, lon: 11.54, topElev: 2388 },
+      "courmayeur-checrouit-val-veny": { name: "Courmayeur (Mont Blanc)", country: "Italy", liftPass: 58, flightHub: "Geneva", lat: 45.79, lon: 6.97, topElev: 2755 },
+      "alagna-valsesia-gressoney-la-trinite-champoluc-frachey-monterosa-ski": { name: "Monterosa Ski (Champoluc / Gressoney)", country: "Italy", liftPass: 52, flightHub: "Milan", lat: 45.83, lon: 7.72, topElev: 3275 },
+      "via-lattea-sestriere-sauze-doulx-san-sicario-claviere-montgenevre": { name: "Via Lattea (Sestriere / Sauze d'Oulx)", country: "Italy", liftPass: 50, flightHub: "Turin", lat: 44.96, lon: 6.89, topElev: 2789 },
+      "bardonecchia": { name: "Bardonecchia", country: "Italy", liftPass: 42, flightHub: "Turin", lat: 45.08, lon: 6.70, topElev: 2800 },
+      "livigno": { name: "Livigno (tax-free)", country: "Italy", liftPass: 48, flightHub: "Milan", lat: 46.55, lon: 10.14, topElev: 2798 },
+      "bormio-cima-bianca": { name: "Bormio", country: "Italy", liftPass: 45, flightHub: "Milan", lat: 46.47, lon: 10.37, topElev: 3017 },
+      "madonna-di-campiglio-pinzolo-folgarida-marilleva": { name: "Madonna di Campiglio", country: "Italy", liftPass: 55, flightHub: "Milan", lat: 46.26, lon: 10.84, topElev: 2504 },
+      "ponte-di-legno-tonale-presena-glacier-temu-pontedilegno-tonale": { name: "Ponte di Legno / Tonale (Glacier)", country: "Italy", liftPass: 48, flightHub: "Milan", lat: 46.25, lon: 10.52, topElev: 3000 },
+      "val-senales-glacier-schnalstaler-gletscher": { name: "Val Senales Glacier (Schnals)", country: "Italy", liftPass: 45, flightHub: "Innsbruck", lat: 46.80, lon: 10.84, topElev: 3212 },
       // ── ANDORRA ─────────────────────────────────────────────────────────────
-      "grandvalira-pas-de-la-casa-grau-roig-soldeu-el-tarter-canillo-encamp": { name: "Grandvalira (Andorra) – Soldeu / Pas de la Casa", country: "Andorra", liftPass: 42, flightHub: "Barcelona", lat: 42.55, lon: 1.74 },
-      "pal-arinsal-la-massana": { name: "Pal Arinsal (Andorra)", country: "Andorra", liftPass: 38, flightHub: "Barcelona", lat: 42.57, lon: 1.52 },
+      "grandvalira-pas-de-la-casa-grau-roig-soldeu-el-tarter-canillo-encamp": { name: "Grandvalira – Soldeu / Pas de la Casa", country: "Andorra", liftPass: 42, flightHub: "Barcelona", lat: 42.55, lon: 1.74, topElev: 2640 },
+      "pal-arinsal-la-massana": { name: "Pal Arinsal (Andorra)", country: "Andorra", liftPass: 38, flightHub: "Barcelona", lat: 42.57, lon: 1.52, topElev: 2537 },
       // ── BULGARIA ────────────────────────────────────────────────────────────
-      "bansko": { name: "Bansko", country: "Bulgaria", liftPass: 38, flightHub: "Sofia", lat: 41.84, lon: 23.49 },
-      "borovets": { name: "Borovets", country: "Bulgaria", liftPass: 32, flightHub: "Sofia", lat: 42.27, lon: 23.60 },
+      "bansko": { name: "Bansko", country: "Bulgaria", liftPass: 38, flightHub: "Sofia", lat: 41.84, lon: 23.49, topElev: 2530 },
+      "borovets": { name: "Borovets", country: "Bulgaria", liftPass: 32, flightHub: "Sofia", lat: 42.27, lon: 23.60, topElev: 2550 },
     };
 
-    // Scrape skiresort.info Europe snow reports (pages 1–4 to cover all resorts)
+    // ── SCRAPE skiresort.info (pages fetched in parallel) ────────────────────
     const scrapePages = async () => {
       const results: Record<string, {
         topCm: number | null; baseCm: number | null;
-        topElev: number | null; baseElev: number | null;
+        topElevR: number | null; baseElev: number | null;
         openKm: number | null; totalKm: number | null;
         openLifts: number | null; totalLifts: number | null;
       }> = {};
@@ -107,25 +111,21 @@ Deno.serve(async (req) => {
           const slug = slugM[1];
           if (!(slug in resortMeta)) continue;
 
-          // Extract the dedicated snow height element first
           const snowBlockM = block.match(/snowreport-snowhight["\s>]+([\s\S]*?)(?:snowreport-detail-button|col-sm-2 snowreport)/);
           const snowText = (snowBlockM ? snowBlockM[1] : block)
-            .replace(/<[^>]+>/g, " ")
-            .replace(/&[^;]+;/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
+            .replace(/<[^>]+>/g, " ").replace(/&[^;]+;/g, " ").replace(/\s+/g, " ").trim();
 
-          const topM  = snowText.match(/(\d+)\s*cm\s*top\s*\((\d+)\s*m\)/);
-          const baseM = snowText.match(/(\d+)\s*cm\s*base\s*\((\d+)\s*m\)/);
+          const topM    = snowText.match(/(\d+)\s*cm\s*top\s*\((\d+)\s*m\)/);
+          const baseM   = snowText.match(/(\d+)\s*cm\s*base\s*\((\d+)\s*m\)/);
           const slopesM = block.match(/([\d.]+)\s*of\s*([\d.]+)\s*km/);
           const liftsM  = block.match(/(\d+)\s*of\s*(\d+)\s*lifts/);
 
           if (topM || baseM) {
             results[slug] = {
-              topCm:    topM  ? parseInt(topM[1])    : null,
-              baseCm:   baseM ? parseInt(baseM[1])   : null,
-              topElev:  topM  ? parseInt(topM[2])    : null,
-              baseElev: baseM ? parseInt(baseM[2])   : null,
+              topCm:    topM    ? parseInt(topM[1])    : null,
+              baseCm:   baseM   ? parseInt(baseM[1])   : null,
+              topElevR: topM    ? parseInt(topM[2])    : null,
+              baseElev: baseM   ? parseInt(baseM[2])   : null,
               openKm:   slopesM ? parseFloat(slopesM[1]) : null,
               totalKm:  slopesM ? parseFloat(slopesM[2]) : null,
               openLifts:  liftsM ? parseInt(liftsM[1]) : null,
@@ -134,44 +134,83 @@ Deno.serve(async (req) => {
           }
         }
       }));
-
       return results;
     };
 
-    // Open-Meteo forecast
+    // ── OPEN-METEO with elevation= fix ───────────────────────────────────────
     const today = new Date();
     const endDate = new Date(today);
     endDate.setDate(today.getDate() + Math.min(days, 7));
     const fmt = (d: Date) => d.toISOString().split("T")[0];
 
-    const fetchForecast = async (lat: number, lon: number) => {
+    const fetchForecast = async (lat: number, lon: number, elevation: number) => {
       try {
-        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=snowfall_sum,temperature_2m_max,temperature_2m_min,weathercode&timezone=auto&start_date=${fmt(today)}&end_date=${fmt(endDate)}`;
+        // elevation= forces Open-Meteo to pick the correct high-altitude grid cell
+        // snow_depth_max = NWP-modelled current snowpack depth (good cross-check)
+        // wind_gusts_10m_max = important for lift closures
+        // precipitation_probability_max = chance of precipitation each day
+        // freezing_level_height = if above base elevation → rain, not snow
+        const url = `https://api.open-meteo.com/v1/forecast` +
+          `?latitude=${lat}&longitude=${lon}&elevation=${elevation}` +
+          `&daily=snowfall_sum,snow_depth_max,temperature_2m_max,temperature_2m_min,` +
+          `wind_gusts_10m_max,precipitation_probability_max,weathercode` +
+          `&hourly=freezing_level_height` +
+          `&timezone=auto&start_date=${fmt(today)}&end_date=${fmt(endDate)}` +
+          `&models=best_match`;
+
         const r = await fetch(url);
         const data = await r.json();
-        const daily = data.daily || {};
-        const totalSnowfall = (daily.snowfall_sum || []).reduce((a: number, b: number) => a + (b || 0), 0);
+        const daily  = data.daily  || {};
+        const hourly = data.hourly || {};
+
+        // Average daily freezing level from hourly data
+        const flHourly = hourly.freezing_level_height || [];
+        const avgFreezingLevel = flHourly.length
+          ? Math.round(flHourly.reduce((a: number, b: number) => a + (b || 0), 0) / flHourly.length)
+          : null;
+
+        const totalSnowfall = (daily.snowfall_sum || [])
+          .reduce((a: number, b: number) => a + (b || 0), 0);
         const temps = daily.temperature_2m_max || [];
-        const avgTempMax = temps.length ? temps.reduce((a: number, b: number) => a + b, 0) / temps.length : 5;
+        const avgTempMax = temps.length
+          ? temps.reduce((a: number, b: number) => a + b, 0) / temps.length : 5;
+
+        // NWP snowpack on first day (model's estimate of current snow depth at summit)
+        const snowDepthNwp = daily.snow_depth_max?.[0] != null
+          ? Math.round(daily.snow_depth_max[0] * 100)  // convert m→cm
+          : null;
+
         const dailyData = (daily.time || []).map((date: string, i: number) => ({
           date,
-          snowfall: Math.round((daily.snowfall_sum?.[i] || 0) * 10) / 10,
-          tempMax:  Math.round((daily.temperature_2m_max?.[i]  || 0) * 10) / 10,
-          tempMin:  Math.round((daily.temperature_2m_min?.[i]  || 0) * 10) / 10,
-          weatherCode: daily.weathercode?.[i] || 0,
+          snowfall:     Math.round((daily.snowfall_sum?.[i]              || 0) * 10) / 10,
+          snowDepthCm:  daily.snow_depth_max?.[i] != null
+            ? Math.round(daily.snow_depth_max[i] * 100) : null,
+          tempMax:      Math.round((daily.temperature_2m_max?.[i]         || 0) * 10) / 10,
+          tempMin:      Math.round((daily.temperature_2m_min?.[i]         || 0) * 10) / 10,
+          windGustKph:  Math.round(daily.wind_gusts_10m_max?.[i]         || 0),
+          precipProb:   daily.precipitation_probability_max?.[i]         ?? null,
+          weatherCode:  daily.weathercode?.[i]                           || 0,
         }));
-        return { totalSnowfall: Math.round(totalSnowfall * 10) / 10, avgTempMax: Math.round(avgTempMax * 10) / 10, dailyData };
+
+        return {
+          totalSnowfall:    Math.round(totalSnowfall * 10) / 10,
+          avgTempMax:       Math.round(avgTempMax    * 10) / 10,
+          snowDepthNwp,
+          avgFreezingLevel,
+          dailyData,
+        };
       } catch {
-        return { totalSnowfall: 0, avgTempMax: 5, dailyData: [] };
+        return { totalSnowfall: 0, avgTempMax: 5, snowDepthNwp: null, avgFreezingLevel: null, dailyData: [] };
       }
     };
 
+    // ── Run everything in parallel ───────────────────────────────────────────
     const [snowData, forecasts] = await Promise.all([
       scrapePages(),
       Promise.all(
         Object.entries(resortMeta).map(async ([slug, meta]) => ({
           slug,
-          forecast: await fetchForecast(meta.lat, meta.lon)
+          forecast: await fetchForecast(meta.lat, meta.lon, meta.topElev)
         }))
       )
     ]);
@@ -179,8 +218,10 @@ Deno.serve(async (req) => {
     const forecastMap = Object.fromEntries(forecasts.map(f => [f.slug, f.forecast]));
 
     const resorts = Object.entries(resortMeta).map(([slug, meta]) => {
-      const snow = snowData[slug] || {};
-      const forecast = forecastMap[slug] || { totalSnowfall: 0, avgTempMax: 5, dailyData: [] };
+      const snow    = snowData[slug]  || {};
+      const forecast = forecastMap[slug] || {
+        totalSnowfall: 0, avgTempMax: 5, snowDepthNwp: null, avgFreezingLevel: null, dailyData: []
+      };
 
       const topCm   = snow.topCm   ?? null;
       const baseCm  = snow.baseCm  ?? null;
@@ -188,12 +229,26 @@ Deno.serve(async (req) => {
       const totalKm = snow.totalKm ?? null;
       const openPct = (openKm && totalKm) ? Math.round((openKm / totalKm) * 100) : null;
 
-      const topScore   = topCm   ? Math.min(topCm  / 4, 30) : 0;
-      const baseScore  = baseCm  ? Math.min(baseCm / 3, 25) : 0;
-      const slopeScore = openPct ? Math.min(openPct / 5, 20) : 0;
-      const fcastScore = Math.min(forecast.totalSnowfall * 2, 15);
-      const tempScore  = forecast.avgTempMax < 0 ? 10 : forecast.avgTempMax < 3 ? 6 : forecast.avgTempMax < 6 ? 3 : 0;
-      const score = Math.round(topScore + baseScore + slopeScore + fcastScore + tempScore);
+      // Rain risk: if avg freezing level < base elevation → rain on lower slopes
+      const baseElevM   = snow.baseElev ?? 1200;
+      const freezingLvl = forecast.avgFreezingLevel;
+      const rainRisk    = freezingLvl !== null && freezingLvl < baseElevM + 200;
+
+      // Wind: gusts >70 km/h typically close lifts
+      const maxGust     = forecast.dailyData.length
+        ? Math.max(...forecast.dailyData.map((d: { windGustKph: number }) => d.windGustKph || 0))
+        : 0;
+      const windWarning = maxGust > 70;
+
+      // Scoring (100 pts total)
+      const topScore    = topCm   ? Math.min(topCm  / 4, 30) : 0;
+      const baseScore   = baseCm  ? Math.min(baseCm / 3, 25) : 0;
+      const slopeScore  = openPct ? Math.min(openPct / 5, 20) : 0;
+      const fcastScore  = Math.min(forecast.totalSnowfall * 2, 15);
+      const tempScore   = forecast.avgTempMax < 0 ? 10 : forecast.avgTempMax < 3 ? 6 : forecast.avgTempMax < 6 ? 3 : 0;
+      let score = Math.round(topScore + baseScore + slopeScore + fcastScore + tempScore);
+      if (rainRisk)    score = Math.max(0, score - 15);
+      if (windWarning) score = Math.max(0, score - 8);
 
       const conditionLabel = score >= 75 ? "Excellent" : score >= 58 ? "Great" : score >= 42 ? "Good" : score >= 28 ? "Fair" : "Poor";
       const conditionEmoji = score >= 75 ? "🏔️" : score >= 58 ? "✅" : score >= 42 ? "👍" : score >= 28 ? "⚠️" : "❌";
@@ -201,14 +256,19 @@ Deno.serve(async (req) => {
       return {
         ...meta, slug,
         topCm, baseCm,
-        topElev:    snow.topElev    ?? null,
-        baseElev:   snow.baseElev   ?? null,
+        topElevResort: snow.topElevR ?? meta.topElev,
+        baseElev: snow.baseElev ?? null,
         openKm, totalKm, openPct,
-        openLifts:  snow.openLifts  ?? null,
-        totalLifts: snow.totalLifts ?? null,
-        forecastSnow: forecast.totalSnowfall,
-        avgTempMax:   forecast.avgTempMax,
-        dailyData:    forecast.dailyData,
+        openLifts:   snow.openLifts  ?? null,
+        totalLifts:  snow.totalLifts ?? null,
+        forecastSnow:    forecast.totalSnowfall,
+        avgTempMax:      forecast.avgTempMax,
+        snowDepthNwp:    forecast.snowDepthNwp,    // NWP model snowpack at summit
+        avgFreezingLevel: forecast.avgFreezingLevel, // avg freezing level (m)
+        rainRisk,
+        windWarning,
+        maxGustKph: maxGust,
+        dailyData:   forecast.dailyData,
         score, conditionLabel, conditionEmoji,
         hasData: topCm !== null || baseCm !== null,
       };
@@ -220,7 +280,15 @@ Deno.serve(async (req) => {
       resorts,
       dateRange: { start: fmt(today), end: fmt(endDate) },
       daysAhead: days,
-      dataSource: "skiresort.info (resort-reported, daily) + Open-Meteo forecast",
+      dataSource: "skiresort.info (resort-reported daily) + Open-Meteo (elevation-corrected, best_match model)",
+      improvements: [
+        "elevation= param: Open-Meteo now uses mountain-top grid cell for accurate summit temps & snowfall",
+        "snow_depth_max: NWP model snowpack depth as cross-check vs resort reports",
+        "wind_gusts_10m_max: lift-closure risk indicator",
+        "precipitation_probability_max: daily precip probability",
+        "freezing_level_height: rain vs snow indicator on lower slopes",
+        "rain risk & wind warning penalty applied to scores"
+      ],
       resortCount: resorts.length,
       withData: resorts.filter(r => r.hasData).length,
     });
