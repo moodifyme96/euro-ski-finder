@@ -1,23 +1,45 @@
-// Euro Ski Finder — backend function
+// Euro Ski Finder — backend function v4
 //
-// KEY FIXES in this version:
-//   • Open-Meteo BATCH API: ONE request for all 57 resorts instead of 57 concurrent calls
-//     (the original 57 concurrent Deno fetches were silently failing / timing out)
-//   • Math.max(...[]) = -Infinity bug fixed → guarded with default
-//   • Scoring fallback: when forecast data is unavailable, score on snow depth only
+// Trip-aware mode: caller passes departureDate + tripDays
+// The forecast window = departureDate … departureDate + tripDays (capped at today+16)
+// Scoring is computed only over the trip window, not from today.
 //
 // Data sources:
 //   • skiresort.info list pages  → top/base snow depth, slopes/lifts open (resort-reported)
-//   • skiresort.info detail page → snow quality, last snowfall date, season end,
+//   • skiresort.info detail page → snow quality, last snowfall, season end,
 //                                  resort's own 7-day new-snow forecast + snow line
-//   • Open-Meteo batch           → temps, wind gusts, precip probability, freezing level
-//                                  (elevation= param forces correct mountain-top grid cell)
+//   • Open-Meteo batch           → temps, wind, precip, freezing level
+//                                  (elevation= param = mountain top grid cell)
 
 Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
-    const { days = 5, mode = "list", slug: detailSlug } = body;
+    const {
+      mode          = "list",
+      slug: detailSlug,
+      // Trip params (new)
+      departureDate,   // "YYYY-MM-DD"  — defaults to today
+      tripDays = 5,    // how many days on the mountain
+    } = body;
 
+    // ── Date helpers ─────────────────────────────────────────────────────────
+    const todayStr = new Date().toISOString().split("T")[0];
+    const maxForecastDate = new Date();
+    maxForecastDate.setDate(maxForecastDate.getDate() + 16);
+    const maxStr = maxForecastDate.toISOString().split("T")[0];
+
+    // Trip window: clamp departure to [today, today+16], end = departure + tripDays
+    const rawDep = departureDate && departureDate >= todayStr ? departureDate : todayStr;
+    const depDate  = rawDep < maxStr ? rawDep : todayStr;
+    const endDateObj = new Date(depDate + "T12:00:00");
+    endDateObj.setDate(endDateObj.getDate() + Math.max(1, Math.min(tripDays, 14)));
+    const endStr = endDateObj.toISOString().split("T")[0] < maxStr
+      ? endDateObj.toISOString().split("T")[0]
+      : maxStr;
+
+    const fmt = (d: Date) => d.toISOString().split("T")[0];
+
+    // ── Resort list ───────────────────────────────────────────────────────────
     const resortList: Array<{
       slug: string; name: string; country: string; liftPass: number;
       flightHub: string; lat: number; lon: number; topElev: number;
@@ -83,25 +105,16 @@ Deno.serve(async (req) => {
 
     const resortMeta = Object.fromEntries(resortList.map(r => [r.slug, r]));
 
-    // ── Date helpers ─────────────────────────────────────────────────────────
-    const today   = new Date();
-    const endDate = new Date(today);
-    endDate.setDate(today.getDate() + Math.min(days, 7));
-    const fmt = (d: Date) => d.toISOString().split("T")[0];
-
-    // ── HTML helpers ──────────────────────────────────────────────────────────
     const stripHtml = (s: string) =>
       s.replace(/<script[\s\S]*?<\/script>/gi, "")
        .replace(/<style[\s\S]*?<\/style>/gi, "")
        .replace(/<[^>]+>/g, " ")
        .replace(/&[^;]+;/g, " ")
-       .replace(/\s+/g, " ")
-       .trim();
+       .replace(/\s+/g, " ").trim();
 
     // ── DETAIL MODE ───────────────────────────────────────────────────────────
     if (mode === "detail" && detailSlug && detailSlug in resortMeta) {
       const meta = resortMeta[detailSlug];
-
       const [detailResp, omResp] = await Promise.all([
         fetch(`https://www.skiresort.info/ski-resort/${detailSlug}/snow-report/`, {
           headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
@@ -111,22 +124,19 @@ Deno.serve(async (req) => {
           `?latitude=${meta.lat}&longitude=${meta.lon}&elevation=${meta.topElev}` +
           `&daily=snowfall_sum,snow_depth_max,wind_gusts_10m_max,precipitation_probability_max,weathercode` +
           `&hourly=freezing_level_height` +
-          `&timezone=auto&start_date=${fmt(today)}&end_date=${fmt(endDate)}&models=best_match`
+          `&timezone=auto&start_date=${depDate}&end_date=${endStr}&models=best_match`
         )
       ]);
-
       const [html, omData] = await Promise.all([detailResp.text(), omResp.json()]);
       const clean = stripHtml(html);
 
-      // Parse detail page fields
-      const qualityM    = clean.match(/Snow quality[:\s]*([^\n]{3,50}?)(?:\s{2,}|Last snowfall)/i);
-      const quality     = qualityM ? qualityM[1].trim() : null;
-      const lastSnowM   = clean.match(/Last snowfall[:\s]*(\d+\s+\w+\s+\d{4})/i);
+      const qualityM     = clean.match(/Snow quality[:\s]*([^\n]{3,50}?)(?:\s{2,}|Last snowfall)/i);
+      const quality      = qualityM ? qualityM[1].trim() : null;
+      const lastSnowM    = clean.match(/Last snowfall[:\s]*(\d+\s+\w+\s+\d{4})/i);
       const lastSnowfall = lastSnowM ? lastSnowM[1] : null;
-      const seasonM     = clean.match(/Ski season[\s\S]{0,40}?(\d+\s+\w+\s+\d{4})\s*[-–]\s*(\d+\s+\w+\s+\d{4})/i);
-      const seasonEnd   = seasonM ? seasonM[2] : null;
+      const seasonM      = clean.match(/Ski season[\s\S]{0,40}?(\d+\s+\w+\s+\d{4})\s*[-–]\s*(\d+\s+\w+\s+\d{4})/i);
+      const seasonEnd    = seasonM ? seasonM[2] : null;
 
-      // Resort's own 7-day snow forecast (much richer than Open-Meteo alone)
       const newSnowMtnM = clean.match(/New snow Mtn\.\s*\d+m([\s\S]{0,600}?)New snow Base/);
       const resortForecast7d: Array<{ snowCm: number; tempMin: number; tempMax: number }> = [];
       if (newSnowMtnM) {
@@ -139,29 +149,25 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Snow line per day (pair: [mountain_snowline, base_snowline])
       const snowLineM = clean.match(/Snow line([\s\S]{0,400}?)New snow Mtn/);
       const snowLines: number[] = [];
       if (snowLineM) for (const v of snowLineM[1].matchAll(/(\d{1,4})\s*m/g)) snowLines.push(parseInt(v[1]));
 
-      // Open-Meteo data for this resort
       const daily  = omData.daily  || {};
       const hourly = omData.hourly || {};
-      const flH = (hourly.freezing_level_height || []) as number[];
-      const avgFreezingLevel = flH.length
-        ? Math.round(flH.filter(v => v != null).reduce((a, b) => a + b, 0) / flH.filter(v => v != null).length)
-        : null;
+      const flH    = ((hourly.freezing_level_height || []) as (number | null)[]).filter(v => v != null) as number[];
+      const avgFreezingLevel = flH.length ? Math.round(flH.reduce((a, b) => a + b, 0) / flH.length) : null;
 
       const detailDays = ((daily.time || []) as string[]).map((date, i) => ({
         date,
         resortSnowCm:  resortForecast7d[i]?.snowCm  ?? null,
         resortTempMin: resortForecast7d[i]?.tempMin ?? null,
         resortTempMax: resortForecast7d[i]?.tempMax ?? null,
-        omSnowCm:      Math.round((daily.snowfall_sum?.[i]       || 0) * 10) / 10,
-        snowDepthCm:   daily.snow_depth_max?.[i] != null ? Math.round(daily.snow_depth_max[i] * 100) : null,
-        windGustKph:   Math.round(daily.wind_gusts_10m_max?.[i]  || 0),
-        precipProb:    daily.precipitation_probability_max?.[i]  ?? null,
-        weatherCode:   daily.weathercode?.[i]                    || 0,
+        omSnowCm:      Math.round(((daily.snowfall_sum?.[i] as number) || 0) * 10) / 10,
+        snowDepthCm:   daily.snow_depth_max?.[i] != null ? Math.round((daily.snow_depth_max[i] as number) * 100) : null,
+        windGustKph:   Math.round((daily.wind_gusts_10m_max?.[i] as number) || 0),
+        precipProb:    (daily.precipitation_probability_max?.[i] as number) ?? null,
+        weatherCode:   (daily.weathercode?.[i] as number) || 0,
         snowLineMtn:   snowLines[i * 2]     ?? null,
         snowLineBase:  snowLines[i * 2 + 1] ?? null,
       }));
@@ -171,7 +177,7 @@ Deno.serve(async (req) => {
 
     // ── LIST MODE ─────────────────────────────────────────────────────────────
 
-    // Step 1: Scrape skiresort.info list pages (4 pages in parallel)
+    // Step 1: scrape snow depths (these are today's resort-reported conditions)
     const scrapePages = async () => {
       const results: Record<string, {
         topCm: number | null; baseCm: number | null;
@@ -185,9 +191,7 @@ Deno.serve(async (req) => {
         "https://www.skiresort.info/snow-reports/europe/page/3/",
         "https://www.skiresort.info/snow-reports/europe/page/4/",
       ].map(async (url) => {
-        const resp = await fetch(url, {
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
-        });
+        const resp   = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } });
         const html   = await resp.text();
         const blocks = html.split(/(?=<div[^>]*class="[^"]*resort-list-item[^"]*")/).slice(1);
         for (const block of blocks) {
@@ -195,26 +199,23 @@ Deno.serve(async (req) => {
           if (!slugM || !(slugM[1] in resortMeta)) continue;
           const slug = slugM[1];
           const snowBlockM = block.match(/snowreport-snowhight["\s>]+([\s\S]*?)(?:snowreport-detail-button|col-sm-2 snowreport)/);
-          const snowText = (snowBlockM ? snowBlockM[1] : block)
-            .replace(/<[^>]+>/g, " ").replace(/&[^;]+;/g, " ").replace(/\s+/g, " ").trim();
+          const snowText = (snowBlockM ? snowBlockM[1] : block).replace(/<[^>]+>/g," ").replace(/&[^;]+;/g," ").replace(/\s+/g," ").trim();
           const topM    = snowText.match(/(\d+)\s*cm\s*top\s*\((\d+)\s*m\)/);
           const baseM   = snowText.match(/(\d+)\s*cm\s*base\s*\((\d+)\s*m\)/);
           const slopesM = block.match(/([\d.]+)\s*of\s*([\d.]+)\s*km/);
           const liftsM  = block.match(/(\d+)\s*of\s*(\d+)\s*lifts/);
-          if (topM || baseM) {
-            results[slug] = {
-              topCm: topM ? parseInt(topM[1]) : null, baseCm: baseM ? parseInt(baseM[1]) : null,
-              topElevR: topM ? parseInt(topM[2]) : null, baseElev: baseM ? parseInt(baseM[2]) : null,
-              openKm: slopesM ? parseFloat(slopesM[1]) : null, totalKm: slopesM ? parseFloat(slopesM[2]) : null,
-              openLifts: liftsM ? parseInt(liftsM[1]) : null, totalLifts: liftsM ? parseInt(liftsM[2]) : null,
-            };
-          }
+          if (topM || baseM) results[slug] = {
+            topCm: topM ? parseInt(topM[1]) : null, baseCm: baseM ? parseInt(baseM[1]) : null,
+            topElevR: topM ? parseInt(topM[2]) : null, baseElev: baseM ? parseInt(baseM[2]) : null,
+            openKm: slopesM ? parseFloat(slopesM[1]) : null, totalKm: slopesM ? parseFloat(slopesM[2]) : null,
+            openLifts: liftsM ? parseInt(liftsM[1]) : null, totalLifts: liftsM ? parseInt(liftsM[2]) : null,
+          };
         }
       }));
       return results;
     };
 
-    // Step 2: Open-Meteo BATCH — single request for ALL resorts (fixes the concurrent-call failure)
+    // Step 2: Open-Meteo batch — forecast window = trip dates
     const fetchAllForecasts = async () => {
       const lats  = resortList.map(r => r.lat).join(",");
       const lons  = resortList.map(r => r.lon).join(",");
@@ -224,27 +225,23 @@ Deno.serve(async (req) => {
         `&daily=snowfall_sum,snow_depth_max,temperature_2m_max,temperature_2m_min,` +
         `wind_gusts_10m_max,precipitation_probability_max,weathercode` +
         `&hourly=freezing_level_height` +
-        `&timezone=auto&start_date=${fmt(today)}&end_date=${fmt(endDate)}&models=best_match`;
+        `&timezone=auto&start_date=${depDate}&end_date=${endStr}&models=best_match`;
       try {
         const r    = await fetch(url);
         const data = await r.json();
-        // Batch returns an array when multiple locations are given
         const arr: Array<typeof data> = Array.isArray(data) ? data : [data];
         return arr.map((d) => {
           const daily  = d.daily  || {};
           const hourly = d.hourly || {};
           const flH    = ((hourly.freezing_level_height || []) as (number | null)[]).filter(v => v != null) as number[];
           const avgFL  = flH.length ? Math.round(flH.reduce((a, b) => a + b, 0) / flH.length) : null;
-          const snowSums = (daily.snowfall_sum || []) as (number | null)[];
+          const snowSums  = (daily.snowfall_sum || []) as (number | null)[];
           const totalSnow = snowSums.reduce((a, b) => a + (b ?? 0), 0);
-          const tempMaxes = (daily.temperature_2m_max || []) as (number | null)[];
-          const validTemps = tempMaxes.filter(v => v != null) as number[];
+          const validTemps = ((daily.temperature_2m_max || []) as (number | null)[]).filter(v => v != null) as number[];
           const avgTempMax = validTemps.length ? validTemps.reduce((a, b) => a + b, 0) / validTemps.length : null;
-          const gusts = (daily.wind_gusts_10m_max || []) as (number | null)[];
-          const validGusts = gusts.filter(v => v != null) as number[];
-          // BUG FIX: guard Math.max with default 0 so empty array doesn't give -Infinity
-          const maxGust = validGusts.length ? Math.max(0, ...validGusts) : 0;
-          const snowDepthNwp = daily.snow_depth_max?.[0] != null ? Math.round(daily.snow_depth_max[0] * 100) : null;
+          const validGusts = ((daily.wind_gusts_10m_max || []) as (number | null)[]).filter(v => v != null) as number[];
+          const maxGust    = validGusts.length ? Math.max(0, ...validGusts) : 0;
+          const snowDepthNwp = daily.snow_depth_max?.[0] != null ? Math.round((daily.snow_depth_max[0] as number) * 100) : null;
           const dailyData = ((daily.time || []) as string[]).map((date, i) => ({
             date,
             omSnowCm:    Math.round(((daily.snowfall_sum?.[i] as number) || 0) * 10) / 10,
@@ -258,34 +255,32 @@ Deno.serve(async (req) => {
           return { totalSnowfall: Math.round(totalSnow * 10) / 10, avgTempMax, snowDepthNwp, avgFreezingLevel: avgFL, maxGust, dailyData };
         });
       } catch {
-        // Return empty forecasts on failure (batch failed)
         return resortList.map(() => ({ totalSnowfall: 0, avgTempMax: null, snowDepthNwp: null, avgFreezingLevel: null, maxGust: 0, dailyData: [] }));
       }
     };
 
-    // Run scrape + batch forecast in parallel
     const [snowData, forecastArr] = await Promise.all([scrapePages(), fetchAllForecasts()]);
 
     const resorts = resortList.map((meta, idx) => {
       const snow     = snowData[meta.slug] || {};
-      const forecast = forecastArr[idx]    || { totalSnowfall: 0, avgTempMax: null, snowDepthNwp: null, avgFreezingLevel: null, maxGust: 0, dailyData: [] };
+      const forecast = forecastArr[idx] || { totalSnowfall: 0, avgTempMax: null, snowDepthNwp: null, avgFreezingLevel: null, maxGust: 0, dailyData: [] };
 
-      const topCm    = snow.topCm   ?? null;
-      const baseCm   = snow.baseCm  ?? null;
-      const openKm   = snow.openKm  ?? null;
-      const totalKm  = snow.totalKm ?? null;
-      const openPct  = (openKm && totalKm) ? Math.round((openKm / totalKm) * 100) : null;
+      const topCm   = snow.topCm   ?? null;
+      const baseCm  = snow.baseCm  ?? null;
+      const openKm  = snow.openKm  ?? null;
+      const totalKm = snow.totalKm ?? null;
+      const openPct = (openKm && totalKm) ? Math.round((openKm / totalKm) * 100) : null;
       const baseElevM = snow.baseElev ?? 1200;
 
       const rainRisk    = forecast.avgFreezingLevel !== null && forecast.avgFreezingLevel < baseElevM + 200;
       const windWarning = forecast.maxGust > 70;
 
-      // Scoring — use avgTempMax only when forecast is available (not null)
-      const topScore   = topCm    ? Math.min(topCm  / 4, 30) : 0;
-      const baseScore  = baseCm   ? Math.min(baseCm / 3, 25) : 0;
-      const slopeScore = openPct  ? Math.min(openPct / 5, 20) : 0;
+      // Score computed over TRIP window
+      const topScore   = topCm   ? Math.min(topCm  / 4, 30) : 0;
+      const baseScore  = baseCm  ? Math.min(baseCm / 3, 25) : 0;
+      const slopeScore = openPct ? Math.min(openPct / 5, 20) : 0;
       const fcastScore = Math.min(forecast.totalSnowfall * 2, 15);
-      const tempScore  = forecast.avgTempMax === null ? 5  // neutral when unavailable
+      const tempScore  = forecast.avgTempMax === null ? 5
         : forecast.avgTempMax < 0 ? 10 : forecast.avgTempMax < 3 ? 6 : forecast.avgTempMax < 6 ? 3 : 0;
       let score = Math.round(topScore + baseScore + slopeScore + fcastScore + tempScore);
       if (rainRisk)    score = Math.max(0, score - 15);
@@ -300,12 +295,12 @@ Deno.serve(async (req) => {
         baseElev: snow.baseElev ?? null,
         openKm, totalKm, openPct,
         openLifts: snow.openLifts ?? null, totalLifts: snow.totalLifts ?? null,
-        forecastSnow:    forecast.totalSnowfall,
-        avgTempMax:      forecast.avgTempMax,
-        snowDepthNwp:    forecast.snowDepthNwp,
+        forecastSnow:     forecast.totalSnowfall,
+        avgTempMax:       forecast.avgTempMax,
+        snowDepthNwp:     forecast.snowDepthNwp,
         avgFreezingLevel: forecast.avgFreezingLevel,
         rainRisk, windWarning, maxGustKph: forecast.maxGust,
-        dailyData:       forecast.dailyData,
+        dailyData:        forecast.dailyData,
         score, conditionLabel, conditionEmoji,
         hasData: topCm !== null || baseCm !== null,
       };
@@ -315,12 +310,11 @@ Deno.serve(async (req) => {
 
     return Response.json({
       resorts,
-      dateRange:    { start: fmt(today), end: fmt(endDate) },
-      daysAhead:    days,
-      dataSource:   "skiresort.info (resort-reported) + Open-Meteo batch (elevation-corrected, 1 API call)",
-      resortCount:  resorts.length,
-      withData:     resorts.filter(r => r.hasData).length,
-      forecastOk:   forecastArr.some(f => f.dailyData.length > 0),
+      tripWindow: { departure: depDate, end: endStr, days: tripDays },
+      dataSource:  "skiresort.info (resort-reported) + Open-Meteo batch (trip-window, elevation-corrected)",
+      resortCount: resorts.length,
+      withData:    resorts.filter(r => r.hasData).length,
+      forecastOk:  forecastArr.some(f => f.dailyData.length > 0),
     });
   } catch (error) {
     return Response.json({ error: (error as Error).message }, { status: 500 });
