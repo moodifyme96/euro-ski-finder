@@ -1,3 +1,4 @@
+// Last-Minute Ski Finder v3
 import { useState, useCallback } from "react";
 import { callBackendFunction } from "@/api/backendFunctions";
 
@@ -92,7 +93,7 @@ export default function Home() {
 
   const tripEnd = addDays(departure, tripDays);
 
-  const S = { /* shared inline styles */
+  const S = {
     card: (idx,open) => ({
       background: idx===0
         ?"linear-gradient(135deg,rgba(59,130,246,0.13),rgba(139,92,246,0.13))"
@@ -110,7 +111,7 @@ export default function Home() {
   return (
     <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0c1a2e 100%)",color:"#e2e8f0",fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"}}>
 
-      {/* ── HEADER ── */}
+      {/* HEADER */}
       <div style={{textAlign:"center",padding:"36px 20px 20px"}}>
         <div style={{fontSize:52}}>⛷️</div>
         <h1 style={{fontSize:28,fontWeight:800,margin:"8px 0 0",background:"linear-gradient(90deg,#60a5fa,#a78bfa,#67e8f9)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>
@@ -121,17 +122,13 @@ export default function Home() {
         </p>
       </div>
 
-      {/* ── TRIP PLANNER ── */}
+      {/* TRIP PLANNER */}
       <div style={{maxWidth:960,margin:"0 auto 28px",padding:"0 16px"}}>
         <div style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:16,padding:"20px 24px"}}>
-
           <div style={{fontSize:11,color:"#64748b",marginBottom:14,textTransform:"uppercase",letterSpacing:1,fontWeight:600}}>
             ✈️ Plan your ski trip
           </div>
-
           <div style={{display:"flex",gap:20,flexWrap:"wrap",alignItems:"flex-end"}}>
-
-            {/* Departure date */}
             <div style={{flex:"1 1 160px"}}>
               <div style={{fontSize:12,color:"#94a3b8",marginBottom:6,fontWeight:500}}>Departure from Tel Aviv</div>
               <input
@@ -148,8 +145,6 @@ export default function Home() {
                 }}
               />
             </div>
-
-            {/* Trip duration */}
             <div style={{flex:"1 1 240px"}}>
               <div style={{fontSize:12,color:"#94a3b8",marginBottom:6,fontWeight:500}}>
                 Trip duration —&nbsp;<span style={{color:"#60a5fa",fontWeight:700}}>{tripDays} days on the mountain</span>
@@ -164,8 +159,6 @@ export default function Home() {
                 ))}
               </div>
             </div>
-
-            {/* Search */}
             <div style={{flex:"0 0 auto"}}>
               <button onClick={fetchList} disabled={loading} style={{
                 padding:"11px 30px",borderRadius:10,border:"none",
@@ -178,8 +171,6 @@ export default function Home() {
               </button>
             </div>
           </div>
-
-          {/* Trip summary */}
           <div style={{marginTop:14,padding:"9px 13px",background:"rgba(59,130,246,0.08)",borderRadius:8,border:"1px solid rgba(59,130,246,0.18)",fontSize:12,color:"#93c5fd"}}>
             📅 Flying out <strong>{fmtDate(departure)}</strong> · skiing {tripDays} days · forecast covers{" "}
             <strong>{fmtDate(departure)}</strong> → <strong>{fmtDate(tripEnd)}</strong>
@@ -196,7 +187,7 @@ export default function Home() {
       {loaded&&(
         <div style={{maxWidth:960,margin:"0 auto",padding:"0 16px 56px"}}>
 
-          {/* ── FILTER BAR ── */}
+          {/* FILTER BAR */}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:10}}>
             <div style={{fontSize:12,color:"#475569"}}>
               <strong style={{color:"#64748b"}}>{filtered.length}</strong> resorts ranked by conditions during your trip
@@ -209,219 +200,192 @@ export default function Home() {
                 <option value="score">Best Overall</option>
                 <option value="top">Peak Snow Depth</option>
                 <option value="base">Base Snow Depth</option>
-                <option value="slopes">% Slopes Open</option>
-                <option value="forecast">Most New Snow</option>
-                <option value="price">Cheapest Pass</option>
+                <option value="slopes">Open Slopes %</option>
+                <option value="forecast">Forecast Snow</option>
+                <option value="price">Lift Pass Price</option>
               </select>
             </div>
           </div>
 
-          {/* ── LEGEND ── */}
-          <div style={{display:"flex",gap:14,marginBottom:12,padding:"7px 12px",background:"rgba(255,255,255,0.02)",borderRadius:8,border:"1px solid rgba(255,255,255,0.05)",flexWrap:"wrap"}}>
-            <span style={{fontSize:11,color:"#475569",fontWeight:600}}>Key:</span>
-            <span style={{fontSize:11,color:"#67e8f9"}}>❄️ Peak snow (summit)</span>
-            <span style={{fontSize:11,color:"#a78bfa"}}>🎿 Base snow (bottom lift)</span>
-            <span style={{fontSize:11,color:"#4ade80"}}>📡 New snow during trip</span>
-            <span style={{fontSize:11,color:"#334155"}}>· Click resort → daily forecast ▼</span>
-          </div>
+          {/* RESORT LIST */}
+          {filtered.map((r,idx)=>{
+            const open = expanded===r.slug;
+            const det  = detailData[r.slug];
+            const loadingDet = detailLoading[r.slug];
+            const medal = idx===0?"🥇":idx===1?"🥈":idx===2?"🥉":null;
 
-          {/* ── RESORT LIST ── */}
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {filtered.map((resort,idx)=>{
-              const isOpen     = expanded===resort.slug;
-              const detail     = detailData[resort.slug];
-              const detLoading = detailLoading[resort.slug];
+            return (
+              <div key={r.slug} style={{marginBottom: open?0:10}}>
+                {/* CARD ROW */}
+                <div onClick={()=>toggleExpand(r.slug)} style={S.card(idx,open)}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
 
-              return (
-                <div key={resort.slug}>
+                    {/* Rank */}
+                    <div style={{fontWeight:800,fontSize:15,minWidth:28,color:idx===0?"#fbbf24":idx===1?"#94a3b8":idx===2?"#cd7c3e":"#475569"}}>
+                      {medal||`#${idx+1}`}
+                    </div>
 
-                  {/* Card */}
-                  <div onClick={()=>toggleExpand(resort.slug)} style={S.card(idx,isOpen)}>
-                    <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                    {/* Name + flag */}
+                    <div style={{flex:"1 1 160px"}}>
+                      <div style={{fontWeight:700,fontSize:15}}>{FLAG(r.country)} {r.name}</div>
+                      <div style={{fontSize:11,color:"#64748b"}}>{r.country} · {r.altRange}</div>
+                    </div>
 
-                      {/* Rank */}
-                      <div style={{fontSize:14,fontWeight:800,minWidth:24,color:idx===0?"#fbbf24":idx===1?"#94a3b8":idx===2?"#cd7c3a":"#475569"}}>
-                        {idx===0?"🥇":idx===1?"🥈":idx===2?"🥉":`#${idx+1}`}
-                      </div>
-
-                      {/* Name */}
-                      <div style={{flex:"1 1 140px",minWidth:130}}>
-                        <div style={{fontWeight:700,fontSize:13.5,lineHeight:1.3}}>
-                          {FLAG(resort.country)} {resort.name}
-                        </div>
-                        <div style={{fontSize:11,color:"#475569",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}>
-                          <span>{resort.country}</span>
-                          <a href={flightUrl(resort.flightHub,departure)} target="_blank" rel="noreferrer"
-                            onClick={e=>e.stopPropagation()} style={{color:"#60a5fa",textDecoration:"none"}}>
-                            ✈️ {resort.flightHub}
-                          </a>
-                          <span style={{color:"#334155"}}>~€{resort.liftPass}/d</span>
+                    {/* Snow depths */}
+                    <div style={{display:"flex",gap:6}}>
+                      <div style={S.box("rgba(6,182,212,0.1)","rgba(6,182,212,0.25)")}>
+                        <div style={{fontSize:10,color:"#67e8f9",marginBottom:2}}>▲ PEAK</div>
+                        <div style={{fontSize:16,fontWeight:800,color:depthColor(r.topCm,true)}}>
+                          {r.topCm!=null?`${r.topCm}cm`:"—"}
                         </div>
                       </div>
-
-                      {/* Snow boxes */}
-                      <div style={{display:"flex",gap:5,alignItems:"stretch"}}>
-
-                        {/* Peak */}
-                        <div style={S.box("rgba(103,232,249,0.06)",`${depthColor(resort.topCm,true)}40`)}>
-                          <div style={{fontSize:9,color:"#64748b",marginBottom:2,textTransform:"uppercase",letterSpacing:0.5}}>Peak ❄️</div>
-                          <div style={{fontSize:20,fontWeight:800,color:depthColor(resort.topCm,true),lineHeight:1}}>
-                            {resort.topCm!=null?resort.topCm:"—"}
-                          </div>
-                          <div style={{fontSize:9,color:"#475569",marginTop:2}}>cm · {resort.topElevResort||resort.topElev}m</div>
-                        </div>
-
-                        {/* Base */}
-                        <div style={S.box("rgba(167,139,250,0.06)",`${depthColor(resort.baseCm,false)}40`)}>
-                          <div style={{fontSize:9,color:"#64748b",marginBottom:2,textTransform:"uppercase",letterSpacing:0.5}}>Base 🎿</div>
-                          <div style={{fontSize:20,fontWeight:800,color:depthColor(resort.baseCm,false),lineHeight:1}}>
-                            {resort.baseCm!=null?resort.baseCm:"—"}
-                          </div>
-                          <div style={{fontSize:9,color:"#475569",marginTop:2}}>cm · {resort.baseElev?`${resort.baseElev}m`:"—"}</div>
-                        </div>
-
-                        {/* New snow */}
-                        <div style={S.box("rgba(34,197,94,0.06)","rgba(34,197,94,0.2)")}>
-                          <div style={{fontSize:9,color:"#64748b",marginBottom:2,textTransform:"uppercase",letterSpacing:0.5}}>+Snow 📡</div>
-                          <div style={{fontSize:20,fontWeight:800,color:resort.forecastSnow>5?"#4ade80":"#64748b",lineHeight:1}}>
-                            {resort.forecastSnow>0?`+${resort.forecastSnow}`:"—"}
-                          </div>
-                          <div style={{fontSize:9,color:"#475569",marginTop:2}}>cm trip fcst</div>
-                        </div>
-                      </div>
-
-                      {/* Slopes + warnings */}
-                      <div style={{display:"flex",flexDirection:"column",gap:4,minWidth:48,alignItems:"flex-end"}}>
-                        {resort.openPct!=null&&(
-                          <div style={{textAlign:"right"}}>
-                            <div style={{fontSize:13,fontWeight:700,color:resort.openPct>80?"#4ade80":resort.openPct>50?"#fbbf24":"#f87171"}}>{resort.openPct}%</div>
-                            <div style={{fontSize:9,color:"#475569"}}>open</div>
-                          </div>
-                        )}
-                        <div style={{display:"flex",gap:3}}>
-                          {resort.windWarning&&<span title={`Gusts ${resort.maxGustKph}km/h`} style={{fontSize:13}}>💨</span>}
-                          {resort.rainRisk&&<span title="Rain risk at base" style={{fontSize:13}}>🌧️</span>}
-                        </div>
-                      </div>
-
-                      {/* Badge */}
-                      <div style={{textAlign:"center",minWidth:50}}>
-                        <div style={{fontSize:18}}>{resort.conditionEmoji}</div>
-                        <div style={{fontSize:9,color:"#475569",marginTop:1}}>{resort.conditionLabel}</div>
-                        <div style={{fontSize:9,color:isOpen?"#60a5fa":"#334155",marginTop:3,fontWeight:600}}>
-                          {isOpen?"▲ close":"▼ forecast"}
+                      <div style={S.box("rgba(139,92,246,0.1)","rgba(139,92,246,0.25)")}>
+                        <div style={{fontSize:10,color:"#a78bfa",marginBottom:2}}>▼ BASE</div>
+                        <div style={{fontSize:16,fontWeight:800,color:depthColor(r.baseCm,false)}}>
+                          {r.baseCm!=null?`${r.baseCm}cm`:"—"}
                         </div>
                       </div>
                     </div>
+
+                    {/* Forecast snow */}
+                    <div style={S.box("rgba(59,130,246,0.1)","rgba(59,130,246,0.2)")}>
+                      <div style={{fontSize:10,color:"#93c5fd",marginBottom:2}}>❄️ FCST</div>
+                      <div style={{fontSize:14,fontWeight:700,color:"#60a5fa"}}>
+                        {r.forecastSnow>0?`+${r.forecastSnow}cm`:"—"}
+                      </div>
+                    </div>
+
+                    {/* Open slopes */}
+                    <div style={S.box("rgba(16,185,129,0.1)","rgba(16,185,129,0.2)")}>
+                      <div style={{fontSize:10,color:"#6ee7b7",marginBottom:2}}>🎿 OPEN</div>
+                      <div style={{fontSize:14,fontWeight:700,color:"#34d399"}}>
+                        {r.openPct!=null?`${r.openPct}%`:"—"}
+                      </div>
+                    </div>
+
+                    {/* Score */}
+                    <div style={{textAlign:"center",minWidth:48}}>
+                      <div style={{fontSize:10,color:"#64748b",marginBottom:2}}>SCORE</div>
+                      <div style={{
+                        fontSize:18,fontWeight:900,
+                        color:r.score>=75?"#4ade80":r.score>=50?"#fbbf24":"#f87171"
+                      }}>{r.score}</div>
+                    </div>
+
+                    <div style={{color:"#475569",fontSize:12}}>{open?"▲":"▼"}</div>
                   </div>
 
-                  {/* ── EXPANDED PANEL ── */}
-                  {isOpen&&(
-                    <div style={{background:"rgba(10,18,35,0.97)",border:"1px solid rgba(99,102,241,0.3)",borderTop:"none",borderRadius:"0 0 12px 12px",padding:"16px 16px 18px"}}>
-
-                      {detLoading&&<div style={{color:"#475569",fontSize:13,padding:"10px 0",textAlign:"center"}}>⏳ Loading resort detail…</div>}
-
-                      {/* Meta */}
-                      {detail&&(
-                        <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:14,paddingBottom:12,borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
-                          {detail.quality&&(
-                            <div style={{fontSize:12}}>
-                              <span style={{color:"#475569"}}>Snow: </span>
-                              <span style={{fontWeight:600}}>{QUALITY_EMOJI[detail.quality.toLowerCase()]||"🏔️"} {detail.quality}</span>
-                            </div>
-                          )}
-                          {detail.lastSnowfall&&(
-                            <div style={{fontSize:12}}>
-                              <span style={{color:"#475569"}}>Last snowfall: </span>
-                              <span style={{fontWeight:600,color:"#67e8f9"}}>❄️ {detail.lastSnowfall}</span>
-                            </div>
-                          )}
-                          {detail.seasonEnd&&(
-                            <div style={{fontSize:12}}>
-                              <span style={{color:"#475569"}}>Season closes: </span>
-                              <span style={{fontWeight:600,color:"#a78bfa"}}>{detail.seasonEnd}</span>
-                            </div>
-                          )}
-                          {resort.openLifts!=null&&(
-                            <div style={{fontSize:12}}>
-                              <span style={{color:"#475569"}}>Lifts: </span>
-                              <span style={{fontWeight:600,color:"#94a3b8"}}>{resort.openLifts}/{resort.totalLifts} open</span>
-                            </div>
-                          )}
-                          {detail.avgFreezingLevel!=null&&(
-                            <div style={{fontSize:12}}>
-                              <span style={{color:"#475569"}}>Freezing level: </span>
-                              <span style={{fontWeight:600,color:detail.avgFreezingLevel<(resort.baseElev||1200)?"#fbbf24":"#4ade80"}}>{detail.avgFreezingLevel}m</span>
-                              {detail.avgFreezingLevel<(resort.baseElev||1200)&&<span style={{color:"#fbbf24",fontSize:10}}> ⚠️ rain at base</span>}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Forecast header */}
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                        <div style={{fontSize:11,color:"#60a5fa",fontWeight:600}}>
-                          📅 Your trip: {fmtDate(departure)} → {fmtDate(tripEnd)}
-                        </div>
-                        <div style={{fontSize:10,color:"#334155"}}>
-                          {detail?"Resort model + Open-Meteo":"Open-Meteo summit forecast"}
-                        </div>
-                      </div>
-
-                      {/* Day cards */}
-                      <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:4}}>
-                        {(detail?detail.detailDays:resort.dailyData).map((d,i)=>{
-                          const snowCm = detail?(d.resortSnowCm??d.omSnowCm):d.omSnowCm;
-                          const tMin   = detail?(d.resortTempMin??d.tempMin):d.tempMin;
-                          const tMax   = detail?(d.resortTempMax??d.tempMax):d.tempMax;
-                          const hasSnow = snowCm>0;
-                          return (
-                            <div key={d.date} style={{
-                              flex:"0 0 auto",width:90,
-                              background:i===0?"linear-gradient(160deg,rgba(59,130,246,0.15),rgba(99,102,241,0.08))":"rgba(255,255,255,0.025)",
-                              border:`1px solid ${i===0?"rgba(99,102,241,0.4)":"rgba(255,255,255,0.06)"}`,
-                              borderRadius:10,padding:"10px 8px 8px",
-                            }}>
-                              <div style={{fontSize:11,fontWeight:600,color:i===0?"#93c5fd":"#64748b",marginBottom:4}}>{fmtDay(d.date)}</div>
-                              <div style={{fontSize:22,lineHeight:1,marginBottom:4}}>{WX[d.weatherCode]||"🌡️"}</div>
-                              <div style={{fontSize:hasSnow?15:11,fontWeight:800,color:hasSnow?"#67e8f9":"#334155",lineHeight:1,marginBottom:4}}>
-                                {hasSnow?`+${snowCm}cm`:"no snow"}
-                              </div>
-                              <div style={{fontSize:11,color:"#94a3b8",marginBottom:3}}>
-                                {tMin!=null&&tMax!=null?`${tMin}°/${tMax}°C`:"—"}
-                              </div>
-                              {d.snowDepthCm!=null&&<div style={{fontSize:10,color:"#475569",marginBottom:2}}>📦 {d.snowDepthCm}cm</div>}
-                              {detail&&d.snowLineMtn!=null&&d.snowLineMtn>0&&<div style={{fontSize:10,color:"#64748b",marginBottom:2}}>❄️ {d.snowLineMtn}m line</div>}
-                              {d.windGustKph>0&&<div style={{fontSize:10,color:d.windGustKph>70?"#f87171":"#64748b",marginBottom:2}}>💨 {d.windGustKph}km/h</div>}
-                              {d.precipProb!=null&&<div style={{fontSize:10,color:"#475569"}}>☁️ {d.precipProb}%</div>}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Links */}
-                      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:14}}>
-                        <a href={`https://www.skiresort.info/ski-resort/${resort.slug}/snow-report/`}
-                          target="_blank" rel="noreferrer"
-                          style={{fontSize:12,color:"#60a5fa",textDecoration:"none",padding:"5px 12px",background:"rgba(59,130,246,0.1)",borderRadius:6,border:"1px solid rgba(59,130,246,0.25)"}}>
-                          📊 Full snow report ↗
-                        </a>
-                        <a href={flightUrl(resort.flightHub,departure)}
-                          target="_blank" rel="noreferrer"
-                          style={{fontSize:12,color:"#a78bfa",textDecoration:"none",padding:"5px 12px",background:"rgba(139,92,246,0.1)",borderRadius:6,border:"1px solid rgba(139,92,246,0.25)"}}>
-                          ✈️ Flights TLV → {resort.flightHub} on {fmtDate(departure)} ↗
-                        </a>
-                      </div>
+                  {/* Snow quality badge */}
+                  {r.snowQuality&&(
+                    <div style={{marginTop:6,fontSize:11}}>
+                      <span style={{background:"rgba(255,255,255,0.06)",borderRadius:6,padding:"2px 7px",color:"#94a3b8"}}>
+                        {QUALITY_EMOJI[r.snowQuality]||"❄️"} {r.snowQuality}
+                      </span>
                     </div>
                   )}
                 </div>
-              );
-            })}
-          </div>
 
-          <div style={{marginTop:24,fontSize:11,color:"#1e293b",textAlign:"center"}}>
-            Snow depths: resort-reported via skiresort.info · Forecast: resort model + Open-Meteo (elevation-corrected) · Updated on demand
-          </div>
+                {/* EXPANDED DETAIL PANEL */}
+                {open&&(
+                  <div style={{background:"rgba(15,23,42,0.85)",border:"1px solid rgba(99,102,241,0.55)",borderTop:"none",borderRadius:"0 0 12px 12px",padding:"16px 18px",marginBottom:10}}>
+                    {loadingDet&&<div style={{color:"#64748b",fontSize:13,textAlign:"center",padding:"20px 0"}}>Loading details…</div>}
+
+                    {det&&(
+                      <>
+                        {/* Forecast bar */}
+                        {det.forecast&&det.forecast.length>0&&(
+                          <div style={{marginBottom:16}}>
+                            <div style={{fontSize:11,color:"#64748b",marginBottom:8,textTransform:"uppercase",letterSpacing:0.8,fontWeight:600}}>
+                              📅 Daily forecast during your trip
+                            </div>
+                            <div style={{display:"flex",gap:5,overflowX:"auto",paddingBottom:4}}>
+                              {det.forecast.map((f,i)=>(
+                                <div key={i} style={{
+                                  flex:"0 0 auto",textAlign:"center",
+                                  background:f.inTrip?"rgba(59,130,246,0.15)":"rgba(255,255,255,0.03)",
+                                  border:`1px solid ${f.inTrip?"rgba(59,130,246,0.4)":"rgba(255,255,255,0.07)"}`,
+                                  borderRadius:8,padding:"7px 9px",minWidth:56,
+                                }}>
+                                  <div style={{fontSize:10,color:f.inTrip?"#93c5fd":"#475569"}}>{fmtDay(f.date).split(" ")[0]}</div>
+                                  <div style={{fontSize:9,color:"#475569"}}>{fmtDay(f.date).split(" ").slice(1).join(" ")}</div>
+                                  <div style={{fontSize:18,margin:"3px 0"}}>{WX[f.wmo]||"❓"}</div>
+                                  <div style={{fontSize:11,color:"#60a5fa",fontWeight:700}}>{f.maxC}°</div>
+                                  <div style={{fontSize:10,color:"#475569"}}>{f.minC}°</div>
+                                  {f.snowCm>0&&<div style={{fontSize:10,color:"#67e8f9",marginTop:2}}>❄️{f.snowCm}cm</div>}
+                                  {f.gustKph>60&&<div style={{fontSize:10,color:"#fbbf24",marginTop:1}}>💨{f.gustKph}</div>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Stats row */}
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+                          {det.openRuns!=null&&(
+                            <div style={S.box("rgba(16,185,129,0.08)","rgba(16,185,129,0.2)")}>
+                              <div style={{fontSize:10,color:"#6ee7b7"}}>Open Runs</div>
+                              <div style={{fontSize:14,fontWeight:700,color:"#34d399"}}>{det.openRuns}/{det.totalRuns}</div>
+                            </div>
+                          )}
+                          {det.openLifts!=null&&(
+                            <div style={S.box("rgba(59,130,246,0.08)","rgba(59,130,246,0.2)")}>
+                              <div style={{fontSize:10,color:"#93c5fd"}}>Open Lifts</div>
+                              <div style={{fontSize:14,fontWeight:700,color:"#60a5fa"}}>{det.openLifts}/{det.totalLifts}</div>
+                            </div>
+                          )}
+                          {det.liftPass&&(
+                            <div style={S.box("rgba(245,158,11,0.08)","rgba(245,158,11,0.2)")}>
+                              <div style={{fontSize:10,color:"#fcd34d"}}>Day Pass</div>
+                              <div style={{fontSize:14,fontWeight:700,color:"#fbbf24"}}>€{det.liftPass}</div>
+                            </div>
+                          )}
+                          {det.village&&(
+                            <div style={S.box("rgba(139,92,246,0.08)","rgba(139,92,246,0.2)")}>
+                              <div style={{fontSize:10,color:"#c4b5fd"}}>Village Alt</div>
+                              <div style={{fontSize:14,fontWeight:700,color:"#a78bfa"}}>{det.village}m</div>
+                            </div>
+                          )}
+                          {det.summit&&(
+                            <div style={S.box("rgba(6,182,212,0.08)","rgba(6,182,212,0.2)")}>
+                              <div style={{fontSize:10,color:"#67e8f9"}}>Summit</div>
+                              <div style={{fontSize:14,fontWeight:700,color:"#22d3ee"}}>{det.summit}m</div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Flight links */}
+                        {r.airports&&r.airports.length>0&&(
+                          <div>
+                            <div style={{fontSize:11,color:"#64748b",marginBottom:7,textTransform:"uppercase",letterSpacing:0.8,fontWeight:600}}>
+                              ✈️ Flights from Tel Aviv ({fmtDate(departure)})
+                            </div>
+                            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                              {r.airports.map(ap=>(
+                                <a key={ap.code} href={flightUrl(ap.code,departure)} target="_blank" rel="noreferrer" style={{
+                                  display:"inline-block",padding:"6px 13px",borderRadius:8,
+                                  background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.35)",
+                                  color:"#93c5fd",fontSize:12,fontWeight:600,textDecoration:"none",
+                                }}>
+                                  ✈️ {ap.code} — {ap.name}
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!loaded&&!loading&&(
+        <div style={{textAlign:"center",padding:"60px 20px",color:"#334155"}}>
+          <div style={{fontSize:48,marginBottom:12}}>🏔️</div>
+          <div style={{fontSize:15}}>Select your dates and hit <strong style={{color:"#60a5fa"}}>Find Best Resorts</strong></div>
         </div>
       )}
     </div>
